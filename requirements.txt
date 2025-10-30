@@ -1,0 +1,20 @@
+# Core Dependencies
+pymssql>=2.2.0          # SQL Server database connection
+python-dotenv>=0.19.0   # Environment variable management
+
+# Data Analysis
+statistics              # Part of Python standard library
+
+# Visualization (Optional but Recommended)
+matplotlib>=3.5.0       # Chart generation
+numpy>=1.21.0          # Numerical computing
+
+# Encryption/Decryption (Optional - for NCX file support)
+pycryptodome>=3.15.0   # Crypto.Cipher support
+# NavicatCipher         # Custom module for Navicat password decryption (if available)
+
+# Development Dependencies (Optional)
+pytest>=7.0.0          # Testing framework
+black>=22.0.0          # Code formatting
+flake8>=4.0.0          # Linting
+mypy>=0.950            # Type checking
