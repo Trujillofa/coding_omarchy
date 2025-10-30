@@ -37,9 +37,13 @@ from decimal import Decimal
 from collections import defaultdict
 import statistics
 
+# Import configuration
+from config import Config, CustomerSegmentation, InventoryConfig, ProfitabilityConfig
+
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=getattr(logging, Config.LOG_LEVEL),
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -271,13 +275,13 @@ class BusinessMetricsCalculator:
 
     def _segment_customer(self, revenue: float, orders: int) -> str:
         """Segment customer based on revenue and order frequency"""
-        if revenue > 500000 and orders > 5:
+        if revenue > CustomerSegmentation.VIP_REVENUE_THRESHOLD and orders > CustomerSegmentation.VIP_ORDERS_THRESHOLD:
             return "VIP"
-        elif revenue > 200000:
+        elif revenue > CustomerSegmentation.HIGH_VALUE_THRESHOLD:
             return "High Value"
-        elif orders > 10:
+        elif orders > CustomerSegmentation.FREQUENT_ORDERS_THRESHOLD:
             return "Frequent"
-        elif revenue > 50000:
+        elif revenue > CustomerSegmentation.REGULAR_REVENUE_THRESHOLD:
             return "Regular"
         else:
             return "Occasional"
@@ -347,9 +351,9 @@ class BusinessMetricsCalculator:
             "top_products": products_list[:30],
             "total_products": len(products_list),
             "underperforming_products": [
-                p for p in products_list if p["profit_margin"] < 10
+                p for p in products_list if p["profit_margin"] < ProfitabilityConfig.LOW_MARGIN_THRESHOLD
             ],
-            "star_products": [p for p in products_list if p["profit_margin"] > 30][:10],
+            "star_products": [p for p in products_list if p["profit_margin"] > ProfitabilityConfig.STAR_PRODUCT_MARGIN][:10],
         }
 
     def analyze_categories(self) -> Dict[str, Any]:
@@ -449,7 +453,7 @@ class BusinessMetricsCalculator:
         slow_movers = []
 
         for product, data in inventory.items():
-            if data["transactions"] > 5:
+            if data["transactions"] > InventoryConfig.FAST_MOVER_THRESHOLD:
                 fast_movers.append(
                     {
                         "product": product,
@@ -457,7 +461,7 @@ class BusinessMetricsCalculator:
                         "total_sold": data["total_sold"],
                     }
                 )
-            elif data["transactions"] < 2:
+            elif data["transactions"] < InventoryConfig.SLOW_MOVER_THRESHOLD:
                 slow_movers.append(
                     {
                         "product": product,
@@ -631,13 +635,19 @@ def load_connections(file_path: str) -> List[Dict[str, Any]]:
 
 
 def fetch_banco_datos(
-    limit: int = 1000, start_date: str = None, end_date: str = None
+    conn_details: Dict[str, Any],
+    limit: int = None,
+    start_date: str = None,
+    end_date: str = None
 ) -> List[Dict[str, Any]]:
     """Fetch data from banco_datos table - DIRECT CONNECTION (no SSH tunnel)
 
-    Filters out records with DocumentosCodigo in ('XY', 'AS', 'TS') to exclude
+    Filters out records with DocumentosCodigo in excluded list to exclude
     certain document types from analysis.
     """
+    if limit is None:
+        limit = Config.DEFAULT_LIMIT
+
     try:
         logger.info(
             f"Connecting to database at {conn_details['Host']}:{conn_details['Port']}"
@@ -648,10 +658,10 @@ def fetch_banco_datos(
             port=conn_details["Port"],
             user=conn_details["UserName"],
             password=conn_details["Password"],
-            database="SmartBusiness",
-            login_timeout=10,
-            timeout=10,
-            tds_version="7.4",
+            database=Config.DB_NAME,
+            login_timeout=Config.DB_LOGIN_TIMEOUT,
+            timeout=Config.DB_TIMEOUT,
+            tds_version=Config.DB_TDS_VERSION,
         )
 
         logger.info("✓ Connected to database successfully")
@@ -663,12 +673,15 @@ def fetch_banco_datos(
         logger.info(f"DB connection test: {result}")
 
         # Get column names
-        cursor.execute("SELECT TOP 0 * FROM [SmartBusiness].[dbo].[banco_datos]")
+        cursor.execute(f"SELECT TOP 0 * FROM [{Config.DB_NAME}].[dbo].[{Config.DB_TABLE}]")
         columns = [desc[0] for desc in cursor.description]
-        logger.info(f"Columns in banco_datos: {columns}")
+        logger.info(f"Columns in {Config.DB_TABLE}: {columns}")
+
+        # Build exclusion list for query
+        excluded_codes = ', '.join([f"'{code}'" for code in Config.EXCLUDED_DOCUMENT_CODES])
 
         # Query to fetch data
-        query = "SELECT TOP %s * FROM [SmartBusiness].[dbo].[banco_datos] WHERE DocumentosCodigo NOT IN ('XY', 'AS', 'TS')"
+        query = f"SELECT TOP %s * FROM [{Config.DB_NAME}].[dbo].[{Config.DB_TABLE}] WHERE DocumentosCodigo NOT IN ({excluded_codes})"
         params = [limit]
 
         if start_date and end_date:
@@ -686,7 +699,7 @@ def fetch_banco_datos(
         conn.close()
 
         if not data:
-            logger.warning("No data retrieved from banco_datos.")
+            logger.warning(f"No data retrieved from {Config.DB_TABLE}.")
         else:
             logger.info(f"✓ Fetched {len(data)} rows successfully")
 
@@ -780,11 +793,14 @@ def generate_visualization_report(
         logger.warning("Matplotlib not available - skipping visualization generation")
         return None
 
+    # Ensure output directory exists
+    Config.ensure_output_dir()
+
     if not output_path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"~/business_analysis_report_{timestamp}.png"
-
-    output_path = os.path.expanduser(output_path)
+        output_path = Config.OUTPUT_DIR / f"business_analysis_report_{timestamp}.png"
+    else:
+        output_path = os.path.expanduser(output_path)
 
     # Extract metrics for easier access
     metrics = analysis["calculated_metrics"]
@@ -1195,11 +1211,11 @@ KEY BUSINESS INSIGHTS & RECOMMENDATIONS
     )
 
     # Save the comprehensive analysis
-    plt.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
+    plt.savefig(str(output_path), dpi=Config.REPORT_DPI, bbox_inches="tight", facecolor="white")
     plt.close(fig)  # Close to free memory
 
     logger.info(f"✅ Visualization report saved to {output_path}")
-    return output_path
+    return str(output_path)
 
 
 def print_detailed_statistics(analysis: Dict[str, Any]):
@@ -1270,8 +1286,9 @@ def main():
     parser.add_argument("--start-date", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End date (YYYY-MM-DD)")
     parser.add_argument(
-        "--limit", type=int, default=1000, help="Max rows (default: 1000)"
+        "--limit", type=int, default=None, help=f"Max rows (default: {Config.DEFAULT_LIMIT})"
     )
+    parser.add_argument("--ncx-file", help="Path to Navicat NCX connections file")
     parser.add_argument(
         "--generate-report", action="store_true", help="Generate visualization report"
     )
@@ -1285,13 +1302,38 @@ def main():
     args = parser.parse_args()
 
     try:
+        # Validate configuration
+        Config.validate()
+
+        # Get database connection details
+        if Config.has_direct_db_config():
+            logger.info("Using direct database configuration from environment")
+            conn_details = {
+                "Host": Config.DB_HOST,
+                "Port": Config.DB_PORT,
+                "UserName": Config.DB_USER,
+                "Password": Config.DB_PASSWORD,
+                "Database": Config.DB_NAME,
+            }
+        else:
+            # Use NCX file
+            ncx_path = args.ncx_file if args.ncx_file else Config.NCX_FILE_PATH
+            logger.info(f"Loading database configuration from NCX file: {ncx_path}")
+            connections = load_connections(ncx_path)
+            if not connections:
+                raise ValueError(f"No valid connections found in {ncx_path}")
+            conn_details = connections[0]
+
         analysis = None
 
         if not args.skip_analysis:
             # Fetch data
-            logger.info("Fetching data from banco_datos...")
+            logger.info(f"Fetching data from {Config.DB_TABLE}...")
             data = fetch_banco_datos(
-                limit=args.limit, start_date=args.start_date, end_date=args.end_date
+                conn_details,
+                limit=args.limit,
+                start_date=args.start_date,
+                end_date=args.end_date
             )
 
             if not data:
@@ -1352,15 +1394,16 @@ def main():
             }
 
             # Save analysis to JSON
+            Config.ensure_output_dir()
             if (
                 actual_start_date != "No dates found"
                 and actual_end_date != "No dates found"
             ):
-                json_output_file = os.path.expanduser(
-                    f"~/analysis_comprehensive_{actual_start_date}_to_{actual_end_date}.json"
-                )
+                json_output_file = Config.OUTPUT_DIR / f"analysis_comprehensive_{actual_start_date}_to_{actual_end_date}.json"
             else:
-                json_output_file = os.path.expanduser("~/analysis_comprehensive.json")
+                json_output_file = Config.OUTPUT_DIR / "analysis_comprehensive.json"
+
+            json_output_file = str(json_output_file)
 
             with open(json_output_file, "w", encoding="utf-8") as f:
                 json.dump(analysis, f, indent=2, ensure_ascii=False, cls=DecimalEncoder)
@@ -1369,23 +1412,24 @@ def main():
 
         else:
             # Load existing analysis
+            output_dir = Config.ensure_output_dir()
             json_files = [
                 f
-                for f in os.listdir(os.path.expanduser("~"))
+                for f in os.listdir(output_dir)
                 if f.startswith("analysis_comprehensive") and f.endswith(".json")
             ]
             if json_files:
                 latest_file = max(
                     json_files,
-                    key=lambda x: os.path.getctime(os.path.expanduser(f"~/{x}")),
+                    key=lambda x: os.path.getctime(output_dir / x),
                 )
-                json_path = os.path.expanduser(f"~/{latest_file}")
+                json_path = output_dir / latest_file
                 logger.info(f"Loading existing analysis from {json_path}")
                 with open(json_path, "r", encoding="utf-8") as f:
                     analysis = json.load(f)
             else:
                 logger.error(
-                    "No existing analysis files found. Run without --skip-analysis first."
+                    f"No existing analysis files found in {output_dir}. Run without --skip-analysis first."
                 )
                 return
 
@@ -1442,13 +1486,6 @@ def main():
 
         traceback.print_exc()
 
-
-# Load connections
-NCX_FILE_PATH = r"/home/yderf/Coding_OMARCHY/python_files/connections.ncx"
-connections = load_connections(NCX_FILE_PATH)
-if not connections:
-    raise ValueError("No valid connections found")
-conn_details = connections[0]
 
 if __name__ == "__main__":
     main()
