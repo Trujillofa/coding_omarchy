@@ -78,6 +78,107 @@ class DecimalEncoder(json.JSONEncoder):
         return super(DecimalEncoder, self).default(obj)
 
 
+# P0 FIX #2: Safe division helper to prevent crashes
+def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Perform division with zero-check to prevent crashes.
+
+    Args:
+        numerator: The dividend
+        denominator: The divisor
+        default: Value to return if denominator is zero (default: 0.0)
+
+    Returns:
+        Result of division, or default if denominator is zero
+
+    Examples:
+        >>> safe_divide(100, 50)
+        2.0
+        >>> safe_divide(100, 0)
+        0.0
+        >>> safe_divide(100, 0, default=-1)
+        -1.0
+    """
+    return numerator / denominator if denominator != 0 else default
+
+
+# P0 FIX #3: Input validation functions
+def validate_date_format(date_str: str, param_name: str) -> datetime:
+    """
+    Validate date string format.
+
+    Args:
+        date_str: Date string to validate
+        param_name: Parameter name for error messages
+
+    Returns:
+        Parsed datetime object
+
+    Raises:
+        ValueError: If date format is invalid
+    """
+    try:
+        parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+
+        # Check if year is reasonable
+        current_year = datetime.now().year
+        if parsed_date.year < 2000 or parsed_date.year > current_year + 1:
+            raise ValueError(
+                f"{param_name} year ({parsed_date.year}) seems unreasonable. "
+                f"Expected between 2000 and {current_year + 1}"
+            )
+
+        return parsed_date
+    except ValueError as e:
+        if "does not match format" in str(e) or "unconverted data remains" in str(e):
+            raise ValueError(
+                f"Invalid {param_name} format: '{date_str}'. "
+                f"Use YYYY-MM-DD format (e.g., 2025-01-15)"
+            )
+        raise
+
+
+def validate_date_range(start_date: str, end_date: str) -> None:
+    """
+    Validate date range.
+
+    Args:
+        start_date: Start date string
+        end_date: End date string
+
+    Raises:
+        ValueError: If dates are invalid or in wrong order
+    """
+    start_dt = validate_date_format(start_date, "start-date")
+    end_dt = validate_date_format(end_date, "end-date")
+
+    if start_dt > end_dt:
+        raise ValueError(
+            f"start-date ({start_date}) must be before or equal to "
+            f"end-date ({end_date})"
+        )
+
+
+def validate_limit(limit: int) -> None:
+    """
+    Validate record limit.
+
+    Args:
+        limit: Number of records to fetch
+
+    Raises:
+        ValueError: If limit is invalid
+    """
+    if limit < 1:
+        raise ValueError(f"limit must be at least 1, got {limit}")
+
+    if limit > 1_000_000:
+        raise ValueError(
+            f"limit ({limit:,}) exceeds maximum (1,000,000). "
+            f"Use smaller limit to prevent memory issues."
+        )
+
+
 # Try to import NavicatCipher
 try:
     from NavicatCipher import Navicat12Crypto
@@ -194,10 +295,10 @@ class BusinessMetricsCalculator:
         if revenues_without_iva and costs:
             gross_profit = sum(revenues_without_iva) - sum(costs)
             metrics["profit"]["gross_profit"] = round(gross_profit, 2)
-            if sum(revenues_without_iva) > 0:
-                metrics["profit"]["gross_profit_margin"] = round(
-                    (gross_profit / sum(revenues_without_iva)) * 100, 2
-                )
+            # P0 FIX: Use safe_divide to prevent crashes
+            metrics["profit"]["gross_profit_margin"] = round(
+                safe_divide(gross_profit, sum(revenues_without_iva), default=0) * 100, 2
+            )
 
         return metrics
 
@@ -241,10 +342,8 @@ class BusinessMetricsCalculator:
                     "customer_name": customer,
                     "total_revenue": round(data["total_revenue"], 2),
                     "total_orders": data["total_orders"],
-                    "average_order_value": (
-                        round(data["total_revenue"] / data["total_orders"], 2)
-                        if data["total_orders"] > 0
-                        else 0
+                    "average_order_value": round(
+                        safe_divide(data["total_revenue"], data["total_orders"], default=0), 2
                     ),
                     "product_diversity": len(data["products_purchased"]),
                     "customer_segment": self._segment_customer(
@@ -264,10 +363,9 @@ class BusinessMetricsCalculator:
             "top_customers": customers_list[:20],
             "total_customers": len(customers_list),
             "customer_concentration": {
-                "top_10_percentage": (
-                    round((top_10_revenue / total_revenue * 100), 2)
-                    if total_revenue > 0
-                    else 0
+                # P0 FIX: Use safe_divide
+                "top_10_percentage": round(
+                    safe_divide(top_10_revenue, total_revenue, default=0) * 100, 2
                 )
             },
             "segmentation": self._aggregate_segments(customers_list),
@@ -327,11 +425,8 @@ class BusinessMetricsCalculator:
         products_list = []
         for product, data in product_data.items():
             profit = data["total_revenue"] - data["total_cost"]
-            profit_margin = (
-                (profit / data["total_revenue"] * 100)
-                if data["total_revenue"] > 0
-                else 0
-            )
+            # P0 FIX: Use safe_divide
+            profit_margin = safe_divide(profit, data["total_revenue"], default=0) * 100
 
             products_list.append(
                 {
@@ -388,11 +483,8 @@ class BusinessMetricsCalculator:
         categories_list = []
         for categoria, data in category_data.items():
             profit = data["total_revenue"] - data["total_cost"]
-            profit_margin = (
-                (profit / data["total_revenue"] * 100)
-                if data["total_revenue"] > 0
-                else 0
-            )
+            # P0 FIX: Use safe_divide
+            profit_margin = safe_divide(profit, data["total_revenue"], default=0) * 100
 
             # Get top subcategories
             subcats = []
@@ -530,13 +622,14 @@ class BusinessMetricsCalculator:
 
         category_margins = {}
         for cat, data in by_category.items():
-            if data["revenue"] > 0:
-                margin = (data["revenue"] - data["cost"]) / data["revenue"] * 100
-                category_margins[cat] = {
-                    "revenue": round(data["revenue"], 2),
-                    "profit": round(data["revenue"] - data["cost"], 2),
-                    "margin": round(margin, 2),
-                }
+            # P0 FIX: Use safe_divide
+            profit = data["revenue"] - data["cost"]
+            margin = safe_divide(profit, data["revenue"], default=0) * 100
+            category_margins[cat] = {
+                "revenue": round(data["revenue"], 2),
+                "profit": round(profit, 2),
+                "margin": round(margin, 2),
+            }
 
         return {
             "by_category": dict(
@@ -644,10 +737,13 @@ def fetch_banco_datos(
 
     Filters out records with DocumentosCodigo in excluded list to exclude
     certain document types from analysis.
+
+    P0 FIX: Added finally block to ensure connection is always closed.
     """
     if limit is None:
         limit = Config.DEFAULT_LIMIT
 
+    conn = None  # P0 FIX: Initialize outside try block
     try:
         logger.info(
             f"Connecting to database at {conn_details['Host']}:{conn_details['Port']}"
@@ -696,7 +792,6 @@ def fetch_banco_datos(
 
         cursor.execute(query, tuple(params))
         data = list(cursor)
-        conn.close()
 
         if not data:
             logger.warning(f"No data retrieved from {Config.DB_TABLE}.")
@@ -705,12 +800,27 @@ def fetch_banco_datos(
 
         return data
 
+    except pymssql.OperationalError as e:
+        # P0 FIX: Better error handling for timeouts
+        if "timeout" in str(e).lower():
+            logger.error(f"❌ Database connection timeout. Check network connectivity.")
+        else:
+            logger.error(f"❌ Database operational error: {e}")
+        raise
     except pymssql.Error as e:
-        logger.error(f"Database error: {e}")
+        logger.error(f"❌ Database error: {e}")
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"❌ Unexpected error: {e}")
         raise
+    finally:
+        # P0 FIX: CRITICAL - Always close connection, even on error
+        if conn:
+            try:
+                conn.close()
+                logger.info("✓ Database connection closed safely")
+            except Exception as e:
+                logger.warning(f"Error closing connection: {e}")
 
 
 def generate_recommendations(metrics: Dict[str, Any]) -> List[str]:
@@ -1246,7 +1356,8 @@ def print_detailed_statistics(analysis: Dict[str, Any]):
     print(f"\n🏆 TOP PRODUCTS:")
     top_products_list = products.get("top_products", [])[:5]
     for i, prod in enumerate(top_products_list, 1):
-        pct = (prod["total_revenue"] / revenue_with_iva) * 100
+        # P0 FIX: Use safe_divide
+        pct = safe_divide(prod["total_revenue"], revenue_with_iva, default=0) * 100
         print(f"   {i}. {prod['product_name'][:60]}")
         print(f"      Revenue: ${prod['total_revenue']:,.2f} ({pct:.1f}% of total)")
 
@@ -1254,17 +1365,21 @@ def print_detailed_statistics(analysis: Dict[str, Any]):
     top_customers_list = customers.get("top_customers", [])[:5]
     total_top_customers = sum(c["total_revenue"] for c in top_customers_list)
     for i, cust in enumerate(top_customers_list, 1):
-        pct = (cust["total_revenue"] / revenue_with_iva) * 100
+        # P0 FIX: Use safe_divide
+        pct = safe_divide(cust["total_revenue"], revenue_with_iva, default=0) * 100
         print(f"   {i}. {cust['customer_name']}")
         print(f"      Revenue: ${cust['total_revenue']:,.2f} ({pct:.1f}% of total)")
+    # P0 FIX: Use safe_divide
+    combined_pct = safe_divide(total_top_customers, revenue_with_iva, default=0) * 100
     print(
-        f"   Combined Top 5: ${total_top_customers:,.2f} ({total_top_customers/revenue_with_iva*100:.1f}% of total)"
+        f"   Combined Top 5: ${total_top_customers:,.2f} ({combined_pct:.1f}% of total)"
     )
 
     print(f"\n🏭 CATEGORY PERFORMANCE:")
     category_performance = categories.get("category_performance", [])[:5]
     for category in category_performance:
-        pct = (category["total_revenue"] / revenue_with_iva) * 100
+        # P0 FIX: Use safe_divide
+        pct = safe_divide(category["total_revenue"], revenue_with_iva, default=0) * 100
         print(f"   {category['category_name'][:50]}")
         print(f"      Revenue: ${category['total_revenue']:,.2f} ({pct:.1f}%)")
         print(f"      Profit Margin: {category['profit_margin']:.1f}%")
@@ -1302,6 +1417,23 @@ def main():
     args = parser.parse_args()
 
     try:
+        # P0 FIX #3: Validate CLI arguments
+        logger.info("Validating input parameters...")
+
+        # Validate dates if provided
+        if args.start_date or args.end_date:
+            if not (args.start_date and args.end_date):
+                raise ValueError(
+                    "Both --start-date and --end-date must be provided together"
+                )
+            validate_date_range(args.start_date, args.end_date)
+            logger.info(f"✓ Date range validated: {args.start_date} to {args.end_date}")
+
+        # Validate limit if provided
+        if args.limit is not None:
+            validate_limit(args.limit)
+            logger.info(f"✓ Limit validated: {args.limit:,} records")
+
         # Validate configuration
         Config.validate()
 
