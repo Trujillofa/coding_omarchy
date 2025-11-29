@@ -12,7 +12,7 @@ Instead of writing SQL or running complex scripts, just ask questions like:
 This uses Vanna AI to convert your questions into SQL queries automatically.
 
 Setup Options:
-1. Cloud (Easy): Use OpenAI/Anthropic API with Vanna hosted vector DB
+1. Cloud (Easy): Use OpenAI/Anthropic/Grok API with Vanna or ChromaDB
 2. Local (Private): Use Ollama + ChromaDB (runs entirely on your machine)
 
 Requirements:
@@ -44,6 +44,10 @@ OLLAMA_MODEL = "mistral"  # or "llama2", "codellama"
 # Option 3: Use Anthropic Claude
 USE_ANTHROPIC = False
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "your-anthropic-api-key")
+
+# Option 4: Use Grok (xAI)
+USE_GROK = False
+GROK_API_KEY = os.getenv("GROK_API_KEY", "your-grok-api-key")
 
 # Database connection (your SmartBusiness SQL Server)
 DB_SERVER = os.getenv("DB_SERVER", "your-server")
@@ -100,8 +104,28 @@ def create_vanna_instance():
             'model': 'claude-3-sonnet-20240229'
         })
 
+    # Option 4: Grok (xAI) - Uses OpenAI-compatible API
+    elif USE_GROK:
+        from vanna.openai import OpenAI_Chat
+        from vanna.chromadb import ChromaDB_VectorStore
+
+        class MyVanna(ChromaDB_VectorStore, OpenAI_Chat):
+            def __init__(self, config=None):
+                ChromaDB_VectorStore.__init__(self, config=config)
+                # Override base_url and api_key for Grok
+                config_with_grok = config or {}
+                config_with_grok['base_url'] = 'https://api.x.ai/v1'
+                config_with_grok['api_key'] = GROK_API_KEY
+                OpenAI_Chat.__init__(self, config=config_with_grok)
+
+        vn = MyVanna(config={
+            'api_key': GROK_API_KEY,
+            'model': 'grok-beta',  # or 'grok-vision-beta'
+            'base_url': 'https://api.x.ai/v1'
+        })
+
     else:
-        raise ValueError("Please enable one of: USE_OPENAI, USE_OLLAMA, or USE_ANTHROPIC")
+        raise ValueError("Please enable one of: USE_OPENAI, USE_OLLAMA, USE_ANTHROPIC, or USE_GROK")
 
     return vn
 
@@ -342,6 +366,11 @@ def main():
     if USE_OPENAI and OPENAI_API_KEY == "your-openai-api-key":
         print("⚠️  WARNING: Set your OPENAI_API_KEY environment variable")
         print("   export OPENAI_API_KEY='sk-...'")
+        print()
+
+    if USE_GROK and GROK_API_KEY == "your-grok-api-key":
+        print("⚠️  WARNING: Set your GROK_API_KEY environment variable")
+        print("   export GROK_API_KEY='xai-...'")
         print()
 
     # Create Vanna instance
