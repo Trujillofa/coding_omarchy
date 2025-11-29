@@ -33,9 +33,9 @@
 			"PorDescuento": "percentage discount",
 			"ValorDescuento": "discount value",
 			"Iva": "tax",
-			"marca": "products brand",
+			"marca": "category",
 			"proveedor": "products provider",
-			"categoria": "category",
+			"categoria": "subcategory",
 			"subcategoria": "subcategory",
 			"departamento": "state",
 			"ciudad": "city"
