@@ -56,7 +56,45 @@ open http://localhost:8084
 
 ---
 
-### Option 2: Local Setup (Free & Private) - Ollama + ChromaDB
+### Option 2: Grok (xAI) - New! 🆕
+
+**Requirements:**
+- Grok API key from x.ai (~$0.01 per question)
+- Internet connection
+
+```bash
+# 1. Install Vanna
+pip install vanna chromadb pyodbc
+
+# 2. Get Grok API key
+# Visit: https://console.x.ai
+# Create account and get API key
+
+# 3. Set your API key
+export GROK_API_KEY='xai-your-key-here'
+
+# 4. Configure src/vanna_chat.py
+# Set: USE_GROK = True
+# Set: USE_OPENAI = False
+# Set: USE_OLLAMA = False
+# Set: USE_ANTHROPIC = False
+
+# 5. Run
+python src/vanna_chat.py
+
+# 6. Open browser
+open http://localhost:8084
+```
+
+**Why Grok?**
+- ✅ Fast responses
+- ✅ Good at complex queries
+- ✅ OpenAI-compatible API (easy to integrate)
+- ✅ Competitive pricing
+
+---
+
+### Option 3: Local Setup (Free & Private) - Ollama + ChromaDB
 
 **Requirements:**
 - Ollama installed (runs LLM locally)
@@ -112,13 +150,14 @@ python vanna_chat.py
 
 ## 📋 Configuration
 
-Edit `vanna_chat.py` with your settings:
+Edit `src/vanna_chat.py` with your settings:
 
 ```python
-# Choose your LLM provider
+# Choose your LLM provider (enable only ONE)
 USE_OPENAI = True      # Recommended for best results
+USE_GROK = False       # 🆕 xAI Grok - Fast and capable
 USE_OLLAMA = False     # Free, local, private
-USE_ANTHROPIC = False  # Alternative cloud option
+USE_ANTHROPIC = False  # Claude - Excellent quality
 
 # Database connection (your SmartBusiness SQL Server)
 DB_SERVER = "your-server"
@@ -130,13 +169,18 @@ DB_PASSWORD = "your-password"
 Or use environment variables:
 
 ```bash
-export OPENAI_API_KEY='sk-...'
+# Choose ONE AI provider
+export OPENAI_API_KEY='sk-...'              # OpenAI
+export GROK_API_KEY='xai-...'               # 🆕 Grok (xAI)
+export ANTHROPIC_API_KEY='sk-ant-...'       # Anthropic
+
+# Database credentials
 export DB_SERVER='your-server'
 export DB_NAME='SmartBusiness'
 export DB_USER='your-username'
 export DB_PASSWORD='your-password'
 
-python vanna_chat.py
+python src/vanna_chat.py
 ```
 
 ---
